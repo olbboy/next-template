@@ -1,376 +1,151 @@
-# Mô tả tính năng và Schema Design cho ứng dụng Roadmap
-
-## I. Mô tả tính năng
-
-### 1. Quản lý người dùng và xác thực
-- **Đăng nhập bằng email**: Sử dụng hệ thống xác thực của Supabase (auth.users).
-- **Hai loại người dùng**: 
-  - User thông thường: Quyền truy cập giới hạn theo vai trò trong roadmap.
-  - Admin: Quyền xem và quản lý tất cả roadmap trên hệ thống.
-- **Hồ sơ người dùng**: Quản lý thông tin cá nhân (tên, email, ảnh đại diện).
-- **Mời người dùng**: Gửi email mời tham gia roadmap với vai trò cụ thể.
-
-### 2. Quản lý roadmap
-- **Tạo roadmap**: Người dùng có thể tạo nhiều roadmap với tên, mô tả, thời gian và mục tiêu cụ thể.
-- **Thêm thành viên**: Mời người dùng khác tham gia roadmap với vai trò (owner, editor, viewer).
-- **Chia sẻ công khai**: Tạo link rút gọn để chia sẻ roadmap công khai, không yêu cầu đăng nhập.
-- **Quản lý thời gian**: Thiết lập khung thời gian (ngày bắt đầu, kết thúc) và các mốc quan trọng (milestones).
-- **Admin access**: Admin có quyền xem và quản lý tất cả roadmap, kể cả những roadmap đã xóa mềm.
-
-### 3. Quản lý posts (features, goals)
-- **Tạo và chỉnh sửa post**: Người dùng tạo các mục tiêu hoặc tính năng với thông tin chi tiết.
-- **Thuộc tính post**:
-  - Tiêu đề và mô tả.
-  - Trạng thái (tùy chỉnh theo roadmap).
-  - Ngày bắt đầu, ngày kết thúc, thời gian dự kiến hoàn thành (ETA).
-  - Thẻ gắn (tags) để phân loại.
-  - Mức độ ưu tiên: Thấp, Trung bình, Cao, Khẩn cấp.
-  - Tiến độ: Phần trăm hoàn thành (0-100%).
-  - Phân công người thực hiện (assignee).
-- **Bình luận và tương tác**: Thảo luận trên post, đề cập người dùng bằng cách đánh dấu (@username).
-- **Tệp đính kèm**: Tải lên và quản lý tệp liên quan (hình ảnh, tài liệu).
-
-### 4. Các chế độ xem và trực quan hóa
-- **Chế độ xem trạng thái (Kanban)**:
-  - Bảng cột theo trạng thái (status).
-  - Kéo thả post giữa các trạng thái.
-  - Chỉ báo trực quan cho mức độ ưu tiên và tiến độ.
-- **Chế độ xem dòng thời gian (Gantt)**:
-  - Biểu đồ Gantt hiển thị các post theo thời gian.
-  - Trực quan hóa phụ thuộc giữa các post bằng đường kết nối.
-  - Đánh dấu các mốc quan trọng.
-- **Chế độ xem hàng tháng/quý**:
-  - Tổ chức post theo tháng hoặc quý.
-  - Thống kê tiến độ và mức độ hoàn thành.
-- **Chế độ xem trực quan hóa**:
-  - Biểu đồ (bar, line) và đồ thị (burndown) hiển thị tiến độ.
-  - Phân tích xu hướng và hiệu suất.
-
-### 5. Hệ thống lọc và sắp xếp
-- **Tìm kiếm toàn văn**: Tìm kiếm nhanh post và roadmap dựa trên nội dung.
-- **Bộ lọc**: Lọc theo trạng thái, ngày tháng, ưu tiên, người thực hiện.
-- **Sắp xếp**: Sắp xếp linh hoạt theo nhiều tiêu chí (ngày, ưu tiên, tiến độ).
-
-### 6. Quản lý phụ thuộc
-- **Xác định phụ thuộc**: Thiết lập mối quan hệ giữa các post (blocks, blocked_by, relates_to, duplicates).
-- **Trực quan hóa phụ thuộc**: Hiển thị các post đang chặn hoặc bị chặn.
-- **Phân tích tác động**: Đánh giá ảnh hưởng của sự chậm trễ lên các post khác.
-
-### 7. Thông báo và hoạt động
-- **Nhật ký hoạt động**: Ghi lại mọi thay đổi trong roadmap (tạo, cập nhật, xóa).
-- **Thông báo**: Gửi thông báo về các thay đổi liên quan (phân công, bình luận, đề cập).
-- **Đề cập người dùng**: Đánh dấu người dùng trong bình luận để thông báo.
-
-## II. Schema Design cho Supabase
-
-### 1. Người dùng và xác thực
-```sql
-CREATE TABLE users (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT NOT NULL UNIQUE,
-  full_name TEXT NOT NULL,
-  display_name TEXT,
-  avatar_url TEXT,
-  is_admin BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  last_active_at TIMESTAMP WITH TIME ZONE,
-  settings JSONB DEFAULT '{}'::JSONB,
-  last_active_roadmap_id UUID REFERENCES roadmaps(id)
-);
-
-CREATE INDEX idx_users_admin ON users(is_admin);
-```
-
-### 2. Roadmap
-```sql
-CREATE TABLE roadmaps (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
-  description TEXT,
-  owner_id UUID NOT NULL REFERENCES auth.users(id),
-  start_date TIMESTAMP WITH TIME ZONE,
-  end_date TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'archived')),
-  is_public BOOLEAN DEFAULT FALSE,
-  public_share_id TEXT UNIQUE,
-  public_share_created_at TIMESTAMP WITH TIME ZONE,
-  settings JSONB DEFAULT '{}'::JSONB,
-  deleted_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE TABLE roadmap_members (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  roadmap_id UUID NOT NULL REFERENCES roadmaps(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'editor' CHECK (role IN ('owner', 'editor', 'viewer')),
-  added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  added_by UUID REFERENCES auth.users(id),
-  UNIQUE(roadmap_id, user_id)
-);
-
-CREATE TABLE statuses (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  roadmap_id UUID NOT NULL REFERENCES roadmaps(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  color TEXT NOT NULL,
-  order_index INTEGER NOT NULL,
-  is_default BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_by UUID NOT NULL REFERENCES auth.users(id),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(roadmap_id, name)
-);
-
-CREATE INDEX idx_roadmaps_owner ON roadmaps(owner_id);
-CREATE INDEX idx_roadmaps_status ON roadmaps(status);
-CREATE INDEX idx_roadmaps_dates ON roadmaps(start_date, end_date);
-CREATE INDEX idx_roadmaps_public ON roadmaps(is_public);
-CREATE INDEX idx_roadmaps_public_share ON roadmaps(public_share_id);
-CREATE INDEX idx_roadmaps_deleted ON roadmaps(deleted_at) WHERE deleted_at IS NOT NULL;
-CREATE INDEX idx_roadmap_members_roadmap ON roadmap_members(roadmap_id);
-CREATE INDEX idx_roadmap_members_user ON roadmap_members(user_id);
-CREATE INDEX idx_statuses_roadmap ON statuses(roadmap_id);
-```
-
-### 3. Posts và phụ thuộc
-```sql
-CREATE TABLE posts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  roadmap_id UUID NOT NULL REFERENCES roadmaps(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT,
-  status_id UUID NOT NULL REFERENCES statuses(id) ON DELETE RESTRICT,
-  start_date TIMESTAMP WITH TIME ZONE,
-  end_date TIMESTAMP WITH TIME ZONE,
-  eta TIMESTAMP WITH TIME ZONE,
-  tags TEXT[] DEFAULT '{}',
-  priority TEXT CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
-  progress INTEGER CHECK (progress >= 0 AND progress <= 100),
-  assignee_id UUID REFERENCES auth.users(id),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_by UUID NOT NULL REFERENCES auth.users(id),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_by UUID REFERENCES auth.users(id),
-  parent_id UUID REFERENCES posts(id) ON DELETE CASCADE,
-  order_index INTEGER DEFAULT 0,
-  metadata JSONB DEFAULT '{}'::JSONB,
-  deleted_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE TABLE dependencies (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  source_post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  target_post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  type TEXT NOT NULL DEFAULT 'blocks' CHECK (type IN ('blocks', 'blocked_by', 'relates_to', 'duplicates')),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_by UUID NOT NULL REFERENCES auth.users(id),
-  UNIQUE(source_post_id, target_post_id)
-);
-
-CREATE TABLE milestones (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  roadmap_id UUID NOT NULL REFERENCES roadmaps(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  description TEXT,
-  date TIMESTAMP WITH TIME ZONE NOT NULL,
-  color TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_by UUID NOT NULL REFERENCES auth.users(id),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  is_completed BOOLEAN DEFAULT FALSE,
-  completed_at TIMESTAMP WITH TIME ZONE,
-  completed_by UUID REFERENCES auth.users(id),
-  deleted_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE INDEX idx_posts_roadmap ON posts(roadmap_id);
-CREATE INDEX idx_posts_status ON posts(status_id);
-CREATE INDEX idx_posts_assignee ON posts(assignee_id);
-CREATE INDEX idx_posts_priority ON posts(priority);
-CREATE INDEX idx_posts_dates ON posts(start_date, end_date, eta);
-CREATE INDEX idx_posts_tags ON posts USING gin(tags);
-CREATE INDEX idx_dependencies_source ON dependencies(source_post_id);
-CREATE INDEX idx_dependencies_target ON dependencies(target_post_id);
-CREATE INDEX idx_milestones_roadmap ON milestones(roadmap_id);
-CREATE INDEX idx_milestones_date ON milestones(date);
-```
-
-### 4. Views và dashboard
-```sql
-CREATE TABLE views (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  roadmap_id UUID NOT NULL REFERENCES roadmaps(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  type TEXT NOT NULL CHECK (type IN ('status', 'timeline', 'month', 'quarter', 'dependency', 'gantt', 'calendar', 'analytics', 'burndown', 'custom')),
-  config JSONB DEFAULT '{}'::JSONB,
-  is_default BOOLEAN DEFAULT FALSE,
-  is_personal BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_by UUID NOT NULL REFERENCES auth.users(id),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(roadmap_id, name, created_by) WHERE is_personal = TRUE,
-  UNIQUE(roadmap_id, name) WHERE is_personal = FALSE
-);
-
-CREATE INDEX idx_views_roadmap ON views(roadmap_id);
-CREATE INDEX idx_views_type ON views(type);
-```
-
-### 5. Tương tác và tài liệu
-```sql
-CREATE TABLE comments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id),
-  content TEXT NOT NULL,
-  parent_id UUID REFERENCES comments(id) ON DELETE CASCADE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  is_edited BOOLEAN DEFAULT FALSE,
-  mentioned_users UUID[] DEFAULT '{}'
-);
-
-CREATE TABLE attachments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  file_url TEXT NOT NULL,
-  file_type TEXT NOT NULL,
-  file_size INTEGER NOT NULL,
-  uploaded_by UUID NOT NULL REFERENCES auth.users(id),
-  uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  description TEXT,
-  is_image BOOLEAN DEFAULT FALSE,
-  thumbnail_url TEXT
-);
-
-CREATE TABLE activity_logs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  roadmap_id UUID REFERENCES roadmaps(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id),
-  entity_type TEXT NOT NULL,
-  entity_id UUID NOT NULL,
-  action TEXT NOT NULL,
-  details JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE notifications (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  type TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  entity_id UUID NOT NULL,
-  is_read BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  read_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE TABLE invitations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email TEXT NOT NULL,
-  roadmap_id UUID NOT NULL REFERENCES roadmaps(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'editor' CHECK (role IN ('editor', 'viewer')),
-  invited_by UUID NOT NULL REFERENCES auth.users(id),
-  token TEXT NOT NULL UNIQUE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-  accepted_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE INDEX idx_comments_post ON comments(post_id);
-CREATE INDEX idx_comments_mentioned_users ON comments USING gin(mentioned_users);
-CREATE INDEX idx_attachments_post ON attachments(post_id);
-CREATE INDEX idx_logs_roadmap ON activity_logs(roadmap_id);
-CREATE INDEX idx_notifications_user ON notifications(user_id);
-CREATE INDEX idx_invitations_roadmap ON invitations(roadmap_id);
-```
-
-## III. Row Level Security (RLS) cho Supabase
-
-### 1. Bảng roadmaps
-```sql
-ALTER TABLE roadmaps ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY admin_view_all_roadmaps ON roadmaps
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.is_admin = TRUE)
-  );
-
-CREATE POLICY member_view_roadmaps ON roadmaps
-  FOR SELECT USING (
-    (EXISTS (SELECT 1 FROM roadmap_members WHERE roadmap_members.roadmap_id = roadmaps.id AND roadmap_members.user_id = auth.uid())
-    OR roadmaps.owner_id = auth.uid())
-    AND roadmaps.deleted_at IS NULL
-  );
-
-CREATE POLICY public_view_roadmaps ON roadmaps
-  FOR SELECT USING (
-    roadmaps.is_public = TRUE AND roadmaps.deleted_at IS NULL
-  );
-
-CREATE POLICY update_roadmaps ON roadmaps
-  FOR UPDATE USING (
-    (roadmaps.owner_id = auth.uid() 
-    OR EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.is_admin = TRUE))
-    AND roadmaps.deleted_at IS NULL
-  );
-
-CREATE POLICY insert_roadmaps ON roadmaps
-  FOR INSERT WITH CHECK (
-    auth.uid() = roadmaps.owner_id
-  );
-```
-
-### 2. Bảng posts
-```sql
-ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY view_posts ON posts
-  FOR SELECT USING (
-    (EXISTS (SELECT 1 FROM roadmap_members WHERE roadmap_members.roadmap_id = posts.roadmap_id AND roadmap_members.user_id = auth.uid())
-    OR EXISTS (SELECT 1 FROM roadmaps WHERE roadmaps.id = posts.roadmap_id AND roadmaps.owner_id = auth.uid())
-    OR EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.is_admin = TRUE))
-    AND posts.deleted_at IS NULL
-  );
-
-CREATE POLICY manage_posts ON posts
-  FOR ALL USING (
-    (EXISTS (SELECT 1 FROM roadmap_members WHERE roadmap_members.roadmap_id = posts.roadmap_id AND roadmap_members.user_id = auth.uid() AND roadmap_members.role IN ('editor', 'owner'))
-    OR EXISTS (SELECT 1 FROM roadmaps WHERE roadmaps.id = posts.roadmap_id AND roadmaps.owner_id = auth.uid())
-    OR EXISTS (SELECT 1 FROM users WHERE users.id = auth.uid() AND users.is_admin = TRUE))
-    AND posts.deleted_at IS NULL
-  );
-```
-
-*Lưu ý: Các chính sách RLS tương tự có thể được áp dụng cho các bảng khác như comments, attachments, v.v., tùy theo yêu cầu cụ thể.*
-
-## IV. Khuyến nghị triển khai
-
-### Chia sẻ công khai:
-- Tạo function SQL để sinh public_share_id ngẫu nhiên khi bật chế độ chia sẻ công khai.
-- Cung cấp API endpoint cho phép truy cập công khai mà không cần đăng nhập.
-- Thêm watermark hoặc ghi nhận nguồn vào roadmap công khai để bảo vệ nội dung.
-
-### Bảo mật và kiểm soát quyền:
-- Sử dụng RLS để phân quyền chi tiết cho từng hành động (SELECT, INSERT, UPDATE, DELETE).
-- Viết các function helper trong Supabase để kiểm tra quyền trước khi thực hiện các hành động quan trọng.
-
-### Quản lý thông báo:
-- Tạo trigger trong database để tự động ghi thông báo khi có thay đổi (phân công, bình luận, v.v.).
-- Sử dụng Supabase Realtime để gửi thông báo thời gian thực đến người dùng.
-
-### Tối ưu hiệu suất:
-- Sử dụng materialized views cho các báo cáo hoặc dashboard phức tạp.
-- Thiết lập database pooling và caching cho các truy vấn phổ biến như danh sách roadmap hoặc post.
-
-### Quản lý tags và mentioned_users:
-- Nếu quy mô ứng dụng lớn, cân nhắc tách tags và mentioned_users thành bảng riêng để tối ưu truy vấn.
-- Sử dụng GIN index cho các cột mảng như tags và mentioned_users để tăng tốc độ tìm kiếm.
+Tổng Quan
+Ứng dụng Employee Recognition Platform nhằm mục đích:
+Vinh danh nhân viên dựa trên thâm niên và thành tích.
+Tạo môi trường tương tác tích cực qua lời chúc, lượt thích, và rút thăm may mắn.
+Đảm bảo tính bảo mật, hiệu suất cao, và trải nghiệm người dùng mượt mà.
+Để hoàn thiện ứng dụng, tôi đề xuất một cách tiếp cận toàn diện với các công nghệ hiện đại như NextJS, Supabase, TailwindCSS, và Shadcn UI, kết hợp các nguyên tắc kỹ thuật tiên tiến và tư duy chiến lược.
+1. Kiến Trúc Hệ Thống
+1.1. Kiến Trúc Full-Stack với NextJS 15 latest
+Công nghệ: NextJS được chọn vì khả năng render phía server (SSR), tạo trang tĩnh (SSG), và tích hợp API routes.
+Lợi ích:
+Cải thiện hiệu suất và SEO.
+Giảm độ phức tạp khi triển khai backend và frontend trong cùng một codebase.
+Triển khai:
+Sử dụng NextJS API Routes để xử lý logic backend (ví dụ: gửi lời chúc, quản lý lượt thích).
+Áp dụng Incremental Static Regeneration (ISR) cho các trang như Leaderboard, cho phép cập nhật dữ liệu định kỳ mà không cần rebuild toàn bộ ứng dụng.
+1.2. Cơ Sở Dữ Liệu với Supabase
+Công nghệ: Supabase (dựa trên PostgreSQL) cung cấp cơ sở dữ liệu quản lý, real-time subscriptions, và xác thực người dùng.
+Lợi ích:
+Hỗ trợ cập nhật giao diện thời gian thực.
+Tích hợp sẵn các tính năng bảo mật như Row-Level Security (RLS).
+Triển khai:
+Sử dụng RLS để kiểm soát quyền truy cập dữ liệu theo vai trò (Employee, HR, Admin).
+Kích hoạt real-time subscriptions cho các bảng như wishes và likes để hiển thị cập nhật tức thời.
+1.3. Giao Diện Người Dùng với TailwindCSS và Shadcn UI
+Công nghệ:
+TailwindCSS v4: Framework CSS utility-first cho styling linh hoạt và responsive.
+Shadcn UI: Thư viện UI components tái sử dụng.
+React-hook-form
+Zod validate
+Lợi ích:
+Giảm thời gian phát triển giao diện.
+Đảm bảo giao diện nhất quán và dễ bảo trì.
+Triển khai:
+Áp dụng utility-first approach của TailwindCSS cho thiết kế responsive.
+Tích hợp các thành phần như Card, Button, Form từ Shadcn UI để tăng tốc phát triển.
+2. Thiết Kế Cơ Sở Dữ Liệu
+Dưới đây là thiết kế chi tiết các bảng cơ sở dữ liệu, bao gồm trường dữ liệu, ràng buộc, và mục đích.
+2.1. Bảng employees
+Mục đích: Lưu trữ thông tin nhân viên.
+Trường dữ liệu:
+id: UUID [Primary Key]
+name: VARCHAR(100) [NOT NULL]
+department_id: UUID [Foreign Key to departments]
+years_of_service: INTEGER [NOT NULL]
+start_date: DATE [NOT NULL]
+position: VARCHAR(100)
+photo_url: VARCHAR(255)
+contact_info: VARCHAR(255) [OPTIONAL]
+Indexes: name, years_of_service, department_id
+Lý do: Tối ưu hóa tìm kiếm, lọc, và sắp xếp trên Leaderboard.
+2.2. Bảng departments
+Mục đích: Quản lý danh sách phòng ban.
+Trường dữ liệu:
+id: UUID [Primary Key]
+name: VARCHAR(100) [NOT NULL]
+Lý do: Liên kết nhân viên với phòng ban để hỗ trợ lọc dữ liệu.
+2.3. Bảng wishes
+Mục đích: Lưu trữ lời chúc gửi đến nhân viên.
+Trường dữ liệu:
+id: UUID [Primary Key]
+employee_id: UUID [Foreign Key to employees]
+sender_id: UUID [Foreign Key to users, NULL nếu ẩn danh]
+content: TEXT [NOT NULL]
+is_anonymous: BOOLEAN [NOT NULL]
+email: VARCHAR(255) [OPTIONAL]
+created_at: TIMESTAMP [NOT NULL]
+status: VARCHAR(20) [NOT NULL, default "approved"]
+Lý do: Hỗ trợ gửi lời chúc ẩn danh, kiểm duyệt nội dung nếu cần.
+2.4. Bảng likes
+Mục đích: Theo dõi lượt thích từ người dùng.
+Trường dữ liệu:
+id: UUID [Primary Key]
+employee_id: UUID [Foreign Key to employees]
+user_id: UUID [Foreign Key to users]
+created_at: TIMESTAMP [NOT NULL]
+Ràng buộc: UNIQUE (employee_id, user_id)
+Lý do: Đảm bảo mỗi người dùng chỉ thích một lần cho mỗi nhân viên.
+2.5. Bảng achievements
+Mục đích: Lưu trữ thành tích của nhân viên.
+Trường dữ liệu:
+id: UUID [Primary Key]
+employee_id: UUID [Foreign Key to employees]
+year: INTEGER [NOT NULL]
+title: VARCHAR(100) [NOT NULL]
+description: TEXT [NOT NULL]
+image_url: VARCHAR(255) [OPTIONAL]
+Lý do: Hiển thị thành tích trên trang chi tiết nhân viên.
+2.6. Bảng lucky_draw_results
+Mục đích: Lưu trữ kết quả rút thăm may mắn.
+Trường dữ liệu:
+id: UUID [Primary Key]
+draw_date: DATE [NOT NULL]
+winner_id: UUID [Foreign Key to employees]
+points: INTEGER [NOT NULL]
+Lý do: Theo dõi lịch sử người thắng và điểm số.
+3. Bảo Mật
+3.1. Xác Thực và Phân Quyền
+Triển khai:
+Sử dụng Supabase Authentication để xác thực người dùng qua email/password hoặc OAuth.
+Áp dụng Row-Level Security (RLS) để phân quyền:
+Employee: Chỉ xem dữ liệu cá nhân và gửi lời chúc/thích.
+HR: Quản lý danh sách nhân viên và thành tích.
+Admin: Toàn quyền quản trị.
+3.2. Bảo Vệ Dữ Liệu
+Triển khai:
+Mã hóa truyền tải dữ liệu bằng HTTPS.
+Sử dụng parameterized queries để ngăn SQL injection.
+Lọc nội dung lời chúc để tránh XSS và từ ngữ không phù hợp (sử dụng thư viện như sanitize-html).
+4. Hiệu Suất
+4.1. Tối Ưu Hóa Truy Vấn
+Triển khai:
+Tạo indexes cho các trường thường xuyên truy vấn (name, years_of_service, department_id).
+Sử dụng pagination cho danh sách lớn (ví dụ: lời chúc trên trang chi tiết).
+4.2. Caching
+Triển khai:
+Dùng ISR của NextJS cho các trang tĩnh như Leaderboard.
+Áp dụng caching cho API routes (ví dụ: dùng Redis để lưu trữ kết quả Leaderboard tạm thời).
+5. Trải Nghiệm Người Dùng
+5.1. Giao Diện Responsive
+Triển khai:
+Sử dụng TailwindCSS với mobile-first design để đảm bảo giao diện hoạt động tốt trên mọi thiết bị.
+Kiểm tra giao diện trên các kích thước màn hình khác nhau.
+5.2. Cập Nhật Thời Gian Thực
+Triển khai:
+Sử dụng Supabase real-time subscriptions để cập nhật tức thời lời chúc và lượt thích.
+Áp dụng optimistic UI updates: Hiển thị hành động (như gửi lời chúc) trước khi nhận xác nhận từ server.
+6. Tính Năng Chi Tiết
+6.1. Leaderboard
+Triển khai:
+Render danh sách nhân viên bằng SSG hoặc ISR.
+Sử dụng infinite scrolling hoặc pagination để tải dữ liệu lớn.
+6.2. Gửi Lời Chúc
+Triển khai:
+Tạo form với validation phía client (React Hook Form) và server.
+Hỗ trợ gửi ẩn danh với bước xác nhận email nếu cần.
+6.3. Trang Chi Tiết Nhân Viên
+Triển khai:
+Dùng SSR để render thông tin nhân viên và thành tích.
+Hiển thị lời chúc với pagination và lazy loading.
+6.4. Tính Năng Thích
+Triển khai:
+Nút thích với animation (ví dụ: sử dụng Framer Motion).
+Kiểm tra trạng thái thích trước khi cho phép hành động.
+6.5. Hiển Thị Công Khai
+Triển khai:
+Cập nhật số lượng tương tác bằng real-time subscriptions.
+Sử dụng debounce để giảm tần suất cập nhật giao diện.
+6.6. Rút Thăm May Mắn
+Triển khai:
+Thiết lập cron job chạy hàng tuần để tính điểm và chọn người thắng.
+Lưu kết quả vào lucky_draw_results và gửi thông báo qua email (dùng SendGrid hoặc Supabase Edge Functions).
